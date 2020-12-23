@@ -5,6 +5,8 @@
 #include<unistd.h>
 #include<termios.h>
 #include<stdlib.h>
+#include<ctype.h>
+#include<stdio.h>
 
 struct termios orig_termios;
 
@@ -23,29 +25,45 @@ void disableRawMode() {
  *   3. Pass the modified attributes to  write the new terminal attributes using tcsetattr func
  *   atexit() comes from <stdlib.h>. We use it to register our disableRawMode() function to be
  *   called automatically when the program exits, whether it exits by returning from main(),
- *   or by calling the exit() function.*/
+ *   or by calling the exit() function.
+ *   Note: there is no simple way of switching from "cooked mode" to "raw mode" apart from manupilating
+ *   a number of flags in terminal attributes structure.
+ */
 void enableRawMode(){
     tcgetattr(STDIN_FILENO, &orig_termios);
-    atexit(disableRawMode);
+
     struct termios  raw  = orig_termios;
-    tcgetattr(STDIN_FILENO, &raw);
     /*
      * ECHO is a bitflag, defined as 00000000000000000000000000001000 in binary.
      * We use the bitwise-NOT operator (~) on this value to get 11111111111111111111111111110111.
      * We then bitwise-AND this value with the flags field, which forces the fourth bit in the
      * flags field to become 0, and causes every other bit to retain its current value.
      */
+    raw.c_iflag &=  ~(IXON); //turns of Ctrl S and Q
     // There is an ICANON flag that allows us to turn off canonical mode.
     // This means we will finally be reading input byte-by-byte, instead of line-by-line.
-    raw.c_lflag &= ~(ECHO | ICANON);
+    // Tuen off Ctrl C and Z by setting ISIG flag
+    // IEXTEN diables Ctrl V
+    raw.c_lflag &= ~(ECHO | ICANON | ISIG | IEXTEN );
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
+    /* Register disableRawMode as a callback when main exits such that we can leave everything
+     * as is afer exit.
+     */
+    atexit(disableRawMode);
 }
 
 int main() {
-    char c;
-
     enableRawMode();
+
+    char c;
     // read one byte at a time and quit reading when key pressed is 'q'
     while (read(STDIN_FILENO, &c, 1)== 1 && c != 'q');
+    //print out the kepresses
+    if (iscntrl(c)) {
+        printf("%d\r\n",c);
+    } else {
+        printf("[SMEditor]: Control key pressed. %d\n", c);
+        printf("%d ('%c')\r\n",c,c);
+    }
     return 0;
 }
