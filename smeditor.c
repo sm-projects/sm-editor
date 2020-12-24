@@ -19,6 +19,15 @@ void disableRawMode() {
 }
 
 /**
+ * Error handling routine
+ * perror() looks at the global erronum and prints out the message
+ * provided by the string s
+ */
+void handleError(const char *s) {
+    perror(s);
+    exit(1);
+}
+/**
  *  In order to set terminal attributes,we need to do the following:
  *   1. Call tcgetattr to read the attributes into a struct
  *   2. Modify attributes within the struct
@@ -38,13 +47,24 @@ void enableRawMode(){
      * We use the bitwise-NOT operator (~) on this value to get 11111111111111111111111111110111.
      * We then bitwise-AND this value with the flags field, which forces the fourth bit in the
      * flags field to become 0, and causes every other bit to retain its current value.
+     *  Also convert carrige return to new line by turning on ICRNL flag.
+     *  Turn off a few other flags;
+     *  BRKINT - allows a break condition to trigger a SIGINT
+     *  INPCK - turns off parity checking
+     *  ISTRIP
      */
-    raw.c_iflag &=  ~(IXON); //turns of Ctrl S and Q
+    raw.c_iflag &=  ~(BRKINT | INPCK | ISTRIP | ICRNL | IXON); //turns of Ctrl S and Q
+
+    /** Turn off all output processing by turning off the OPOST flag. */
+    raw.c_oflag &= ~(OPOST);
     // There is an ICANON flag that allows us to turn off canonical mode.
     // This means we will finally be reading input byte-by-byte, instead of line-by-line.
     // Tuen off Ctrl C and Z by setting ISIG flag
     // IEXTEN diables Ctrl V
     raw.c_lflag &= ~(ECHO | ICANON | ISIG | IEXTEN );
+    raw.c_cc[VMIN] = 0; //set control charecter flags for read() to wait on bytes read, return afterwards
+    raw.c_cc[VTIME] = 1; //set cc VTIME to max wait time for read() before it returns
+
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
     /* Register disableRawMode as a callback when main exits such that we can leave everything
      * as is afer exit.
@@ -55,15 +75,17 @@ void enableRawMode(){
 int main() {
     enableRawMode();
 
-    char c;
     // read one byte at a time and quit reading when key pressed is 'q'
-    while (read(STDIN_FILENO, &c, 1)== 1 && c != 'q');
-    //print out the kepresses
-    if (iscntrl(c)) {
-        printf("%d\r\n",c);
-    } else {
-        printf("[SMEditor]: Control key pressed. %d\n", c);
-        printf("%d ('%c')\r\n",c,c);
+    while (1) {
+        char c = '\0';
+        read(STDIN_FILENO, &c, 1);
+        if (iscntrl(c)) {
+            printf("%d\r\n",c);
+        }   else {
+            printf("[SMEditor]: Control key pressed. %d\n", c);
+            printf("%d ('%c')\r\n",c,c);
+        }
+        if (c == 'q') break;
     }
     return 0;
 }
