@@ -1,5 +1,5 @@
 /**
- *  A simple editor implem,entation.
+ *  A simple editor implementation.
  */
 
 #include<unistd.h>
@@ -7,10 +7,17 @@
 #include<stdlib.h>
 #include<ctype.h>
 #include<stdio.h>
+#include<errno.h>
+
+
+#define CTRL_KEY(k)  ((k) & 0x1f)
 
 struct termios orig_termios;
 
+/** All terminal handling functions. ************************************/
+
 /**
+ *
  *  We save the original terminal attributes in the orig_termios struct and call
  *  this function to set the user's terminal back to original state.
  */
@@ -25,8 +32,35 @@ void disableRawMode() {
  */
 void handleError(const char *s) {
     perror(s);
+    //Clear screen before exit
+    write(STDOUT_FILENO, "\x1b[2J",4); //J command erases everything in display
+    write(STDOUT_FILENO, "\x1b[H", 3); //Repositions the cursor to the first row and col
     exit(1);
 }
+
+char editorReadKey() {
+    int nread;
+    char c;
+
+    while((nread = read(STDIN_FILENO, &c, 1)) != 1){
+        if (nread == -1 && errno != EAGAIN) handleError("SMEDITOR: Error reading charecter.");
+    }
+    return c;
+}
+/** All keyboard input handling functions. ******************************/
+void processKeypress() {
+    char c = editorReadKey();
+
+    switch(c) {
+        case CTRL_KEY('q'):
+            //Clear screen before exit
+            write(STDOUT_FILENO, "\x1b[2J",4); //J command erases everything in display
+            write(STDOUT_FILENO, "\x1b[H", 3); //Repositions the cursor to the first row and col
+            exit(0);
+            break;
+    }
+}
+
 /**
  *  In order to set terminal attributes,we need to do the following:
  *   1. Call tcgetattr to read the attributes into a struct
@@ -72,20 +106,37 @@ void enableRawMode(){
     atexit(disableRawMode);
 }
 
+
+/**       Editor output functions. *******************************************/
+
+void editorDrawRows() {
+    int i;
+    for (i=0;i<24;i++){
+        write(STDOUT_FILENO, "~\r\n", 3);
+    }
+}
+
+/**
+ * In order to clear the screen, we are writing an escape sequence to the terminal.
+ * Escape sequences always start with an escape character (27) followed by a [ character.
+ * Escape sequences instruct the terminal to do various text formatting tasks, such as
+ * coloring text, moving the cursor around, and clearing parts of the screen.
+ **/
+void editorClearScreen() {
+    write(STDOUT_FILENO, "\x1b[2J",4); //J command erases everything in display
+    write(STDOUT_FILENO, "\x1b[H", 3); //Repositions the cursor to the first row and col
+    editorDrawRows();
+    write(STDOUT_FILENO, "\x1b[H", 3); //Repositions the cursor to the first row and col
+}
+
+
 int main() {
     enableRawMode();
 
     // read one byte at a time and quit reading when key pressed is 'q'
     while (1) {
-        char c = '\0';
-        read(STDIN_FILENO, &c, 1);
-        if (iscntrl(c)) {
-            printf("%d\r\n",c);
-        }   else {
-            printf("[SMEditor]: Control key pressed. %d\n", c);
-            printf("%d ('%c')\r\n",c,c);
-        }
-        if (c == 'q') break;
+        editorClearScreen();
+        processKeypress();
     }
     return 0;
 }
