@@ -65,21 +65,24 @@ char editorReadKey() {
  * Let’s print out each character from the standard input to see what the reply
  * looks like.
  */
-int getCursorPosition() {
+int getCursorPosition(int *rows, int *cols) {
+    char buf[32];
+    unsigned int i =0;
+
     if (write(STDOUT_FILENO, "\x1b[6n",4) != 4) return -1;
 
-    printf("\r\n");
-    char c;
-    while(read(STDIN_FILENO,&c,1) == 1) {
-        if(iscntrl(c)){
-            printf("%d\r\n",c);
-        } else {
-            printf("%d ('%c')\r\n", c, c);
-        }
+    while( i < sizeof(buf) - 1 ){
+        if (read(STDIN_FILENO, &buf[i], 1) == 1) break;
+        if (buf[i] == 'R') break;
+        i++;
     }
-    editorReadKey();
+    buf[i] = '\0';
+    printf("\r\n &buf[i]: '%s'\r\n", &buf[i]);
 
-    return -1;
+    if (buf[0] != '\x1b' || buf[1] != '[') return -1;
+    if (sscanf(&buf[2], "%d;%d", rows, cols) != 2) return -1;
+
+    return 0;
 }
 
 /**
@@ -100,9 +103,9 @@ int getWindowSize(int *rows, int *cols) {
    /* We also check to make sure the values it gave back weren’t 0,
     * because apparently that’s a possible erroneous outcome.
     */
-    if( 1 || ioctl(STDOUT_FILENO,TIOCGWINSZ,&ws) == -1 || ws.ws_col == 0) {
+    if(ioctl(STDOUT_FILENO,TIOCGWINSZ,&ws) == -1 || ws.ws_col == 0) {
         if(write(STDOUT_FILENO,"\x1b[999C\x1b[999B", 12) != 12) return -1;
-        return getCursorPosition();
+        return getCursorPosition(rows, cols);
     } else {
         *cols = ws.ws_col;
         *rows = ws.ws_row;
@@ -180,7 +183,11 @@ void enableRawMode(){
 void editorDrawRows() {
     int i;
     for (i=0; i<editC.screen_rows; i++){
-        write(STDOUT_FILENO, "~\r\n", 3);
+        write(STDOUT_FILENO, "~", 1);
+
+        if (i <  editC.screen_rows - 1) {
+            write(STDOUT_FILENO, "\r\n", 2);
+        }
     }
 }
 
