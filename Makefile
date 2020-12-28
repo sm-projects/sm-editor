@@ -6,3 +6,6 @@ clean:
 
 show:
 	firefox  https://viewsourcecode.org/snaptoken/kilo/01.setup.html &
+
+git-push:
+	git push origin
