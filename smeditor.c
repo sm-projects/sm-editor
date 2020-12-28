@@ -17,6 +17,7 @@
 
 // A struct to hold edtor configs and state.
 struct editorConfig {
+ int cx,cy; //track cursor's position
  //Number of icols and rows in the screen available from ioctl
  int screen_rows;
  int screen_cols;
@@ -25,7 +26,7 @@ struct editorConfig {
 
 struct editorConfig editC;
 
-/** All terminal handling functions. ************************************/
+/** ================= All terminal handling functions. ==========================*/
 
 /**
  *
@@ -114,9 +115,7 @@ int getWindowSize(int *rows, int *cols) {
         return 0;
     }
 }
-/** All write buffer handling goes here. *******************************/
-
-
+/** ======================== All write buffer handling goes here. ===================*/
 struct appendBuf {
     char *buf;
     int  len;
@@ -151,7 +150,18 @@ void bufferFree(struct appendBuf *ab) {
   free(ab->buf);
 }
 
-/** All keyboard input handling functions. ******************************/
+/** ===================== All keyboard input handling functions. =====================*/
+
+void editorMoveCursor(char key) {
+    switch(key) {
+        case 'a':
+        case 'd':
+        case 'w':
+        case 's':
+            break;
+    }
+}
+
 void processKeypress() {
     char c = editorReadKey();
 
@@ -177,7 +187,6 @@ void processKeypress() {
  *   a number of flags in terminal attributes structure.
  */
 void enableRawMode(){
-
     if (tcgetattr(STDIN_FILENO, &editC.orig_termios) == -1)
         handleError("Problem getting terminical config struct.");
 
@@ -215,6 +224,7 @@ void enableRawMode(){
         handleError("Error changing terminal config attributes.");
     }
 }
+
 
 /**  Editor output functions. *******************************************/
 
@@ -271,7 +281,12 @@ void editorClearScreen() {
 
     editorDrawRows(&ab);
 
-    appendToBuffer(&ab, "\x1b[H", 3); //Repositions the cursor to the first row and col
+    char buf[32];
+    snprintf(buf,sizeof(buf),"\x1b[%d;%dH",editC.cx + 1, editC.cy + 1);
+    appendToBuffer(&ab,buf,strlen(buf));
+
+
+    //appendToBuffer(&ab, "\x1b[H", 3); //Repositions the cursor to the first row and col
     appendToBuffer(&ab, "\x1b[?25h",6); //Hides the cursor
 
     write(STDOUT_FILENO,ab.buf, ab.len);
@@ -280,6 +295,9 @@ void editorClearScreen() {
 
 /** Editor init. */
 void initEditor() {
+    //Set cursor position to top left corner
+    editC.cx = 0;
+    editC.cy = 0;
     if (getWindowSize(&editC.screen_rows, &editC.screen_cols) == -1) {
         handleError("Unable to get window size.");
     }
