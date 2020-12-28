@@ -9,9 +9,11 @@
 #include<ctype.h>
 #include<stdio.h>
 #include<errno.h>
+#include<string.h>
 
 
 #define CTRL_KEY(k)  ((k) & 0x1f)
+#define SMEDITOR_VERSION "Alpha-0.0.1"
 
 // A struct to hold edtor configs and state.
 struct editorConfig {
@@ -112,6 +114,42 @@ int getWindowSize(int *rows, int *cols) {
         return 0;
     }
 }
+/** All write buffer handling goes here. *******************************/
+
+
+struct appendBuf {
+    char *buf;
+    int  len;
+};
+
+#define BUFFER_INIT  {NULL, 0}
+
+/**
+ * This method appends a string s to an abuf, the first thing it does is to make sure
+ * there is enough memory to hold the new string.
+ * It calls realloc() to give us a block of memory that is the size of the current
+ * string plus the size of the string being appended.
+ * realloc() will either extend the size of the block of memory we already have
+ * allocated, or it will take care of free()ing the current block of memory and
+ * allocating a new block of memory somewhere else that is big enough for our new string.
+ * Then we use memcpy() to copy the string s after the end of the current data in the
+ * buffer, and we update the pointer and length of the abuf to the new values.
+ */
+void appendToBuffer(struct appendBuf *ab, const char *s, int len) {
+    char *new = realloc(ab->buf,ab->len + len);
+
+    if (new == NULL) return;
+    memcpy(&new[ab->len], s, len);
+    ab->buf = new;
+    ab->len += len;
+}
+
+/**
+ * abFree() is a destructor that deallocates the dynamic memory used by an abuf.
+ */
+void bufferFree(struct appendBuf *ab) {
+  free(ab->buf);
+}
 
 /** All keyboard input handling functions. ******************************/
 void processKeypress() {
@@ -178,15 +216,36 @@ void enableRawMode(){
     }
 }
 
-/**       Editor output functions. *******************************************/
+/**  Editor output functions. *******************************************/
 
-void editorDrawRows() {
+void editorDrawRows(struct appendBuf *ab) {
     int i;
     for (i=0; i<editC.screen_rows; i++){
-        write(STDOUT_FILENO, "~", 1);
+        if(i == editC.screen_rows/3) {
+            char welcomeMessage[80];
 
+            int welcomeLen = snprintf(welcomeMessage, sizeof(welcomeMessage),
+                    "SM-Editor -- version %s", SMEDITOR_VERSION);
+
+            if(welcomeLen > editC.screen_cols)
+                welcomeLen = editC.screen_cols;
+
+            //Center the welcome message on the screeni
+            int padding = (editC.screen_cols - welcomeLen / 2);
+
+            if(padding) {
+                appendToBuffer(ab,"~",1);
+                padding--;
+            }
+            while(padding--) appendToBuffer(ab," ",1);
+            appendToBuffer(ab,welcomeMessage,welcomeLen);
+        } else {
+            appendToBuffer(ab, "~", 1);
+        }
+
+        appendToBuffer(ab,"\x1b[K",3); //put a <esc>[K sequence at the end of each line we draw
         if (i <  editC.screen_rows - 1) {
-            write(STDOUT_FILENO, "\r\n", 2);
+            appendToBuffer(ab, "\r\n", 2);
         }
     }
 }
@@ -196,12 +255,27 @@ void editorDrawRows() {
  * Escape sequences always start with an escape character (27) followed by a [ character.
  * Escape sequences instruct the terminal to do various text formatting tasks, such as
  * coloring text, moving the cursor around, and clearing parts of the screen.
- **/
+ *
+ * In editorRefreshScreen(), we first initialize a new abuf called ab, by assigning
+ * BUFFER_INIT to it. We then replace each occurrence of write(STDOUT_FILENO, ...)
+ * with abAppend(&ab, ...). We also pass ab into editorDrawRows(), so it too can
+ * use abAppend(). Lastly, we write() the buffer’s contents out to standard output
+ * and free the memory used by the abuf
+ */
 void editorClearScreen() {
-    write(STDOUT_FILENO, "\x1b[2J",4); //J command erases everything in display
-    write(STDOUT_FILENO, "\x1b[H", 3); //Repositions the cursor to the first row and col
-    editorDrawRows();
-    write(STDOUT_FILENO, "\x1b[H", 3); //Repositions the cursor to the first row and col
+    struct appendBuf ab = BUFFER_INIT;
+
+    appendToBuffer(&ab, "\x1b[?25l",6); //Hides the cursor
+    //appendToBuffer(&ab, "\x1b[2J",4); //J command erases everything in display
+    appendToBuffer(&ab, "\x1b[H", 3); //Repositions the cursor to the first row and col
+
+    editorDrawRows(&ab);
+
+    appendToBuffer(&ab, "\x1b[H", 3); //Repositions the cursor to the first row and col
+    appendToBuffer(&ab, "\x1b[?25h",6); //Hides the cursor
+
+    write(STDOUT_FILENO,ab.buf, ab.len);
+    bufferFree(&ab);
 }
 
 /** Editor init. */
