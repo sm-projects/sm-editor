@@ -19,7 +19,9 @@ enum editorKey {
     ARROW_LEFT = 1000,
     ARROW_RIGHT ,
     ARROW_UP ,
-    ARROW_DOWN
+    ARROW_DOWN,
+    PAGE_UP,
+    PAGE_DOWN
 };
 
 // A struct to hold edtor configs and state.
@@ -79,16 +81,26 @@ int editorReadKey() {
         if(read(STDIN_FILENO, &seq[1], 1) != 1) return '\x1b';
 
         if (seq[0] == '[') {
-            switch(seq[1]) {
-                case 'A': return ARROW_UP;
-                case 'B': return ARROW_DOWN;
-                case 'C': return ARROW_RIGHT;
-                case 'D': return ARROW_LEFT;
+            if(seq[1] >= '0' && seq[1] <= '9') {
+                if(read(STDIN_FILENO, &seq[2], 1) != 1) return '\x1b';
+                if(seq[2] == '~') {
+                    switch(seq[1]) {
+                        case '5': return PAGE_UP;
+                        case '6': return PAGE_DOWN;
+                    }
+                }
+            } else {
+                switch(seq[1]) {
+                    case 'A': return ARROW_UP;
+                    case 'B': return ARROW_DOWN;
+                    case 'C': return ARROW_RIGHT;
+                    case 'D': return ARROW_LEFT;
+                }
             }
         }
         return '\x1b';
     } else {
-        return c;
+       return c;
     }
 }
 
@@ -185,18 +197,26 @@ void bufferFree(struct appendBuf *ab) {
 /** ===================== All keyboard input handling functions. =====================*/
 
 void editorMoveCursor(int key) {
-    switch(key) {
+    switch(key) {//the if checks prevent the cursor from going off the screen
         case ARROW_LEFT:
-            editC.cx--;  //move left
+            if (editC.cx != 0) {
+                editC.cx--;  //move left
+            }
             break;
         case ARROW_RIGHT:
-            editC.cx++;  //move right
+            if (editC.cx != editC.screen_cols - 1) {
+                editC.cx++;  //move right
+            }
             break;
         case ARROW_UP:
-            editC.cy--; //move up
+            if(editC.cy != 0) {
+                editC.cy--; //move up
+            }
             break;
         case ARROW_DOWN:
-            editC.cy++; //move right
+            if(editC.cy != editC.screen_rows - 1) {
+                editC.cy++; //move right
+            }
             break;
     }
 }
@@ -209,6 +229,15 @@ void editorProcessKeypress() {
             write(STDOUT_FILENO, "\x1b[2J",4); //J command erases everything in display
             write(STDOUT_FILENO, "\x1b[H", 3); //Repositions the cursor to the first row and col
             exit(0);
+            break;
+        case PAGE_UP:
+        case PAGE_DOWN:
+            {
+                int times = editC.screen_rows;
+                while(times--) {
+                    editorMoveCursor(c == PAGE_UP ? ARROW_UP : ARROW_DOWN);
+                }
+            }
             break;
         case ARROW_UP:
         case ARROW_DOWN:
