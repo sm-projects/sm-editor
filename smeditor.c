@@ -1,5 +1,5 @@
 /**
- *  A simple editor implementation.
+ *  A simple text editor implementation.
  */
 
 //Add feature test macros
@@ -9,6 +9,7 @@
 
 
 #include<sys/ioctl.h>
+#include<sys/types.h>
 #include<unistd.h>
 #include<termios.h>
 #include<stdlib.h>
@@ -46,7 +47,7 @@ struct editorConfig {
  int screen_rows;
  int screen_cols;
  int num_rows;
- erow row;
+ erow *row; //Make it an array of rows in order to store rows read from a file.
  struct termios orig_termios;
 };
 
@@ -60,10 +61,11 @@ struct editorConfig editC;
  * provided by the string s
  */
 void handleError(const char *s) {
-    perror(s);
     //Clear screen before exit
     write(STDOUT_FILENO, "\x1b[2J",4); //J command erases everything in display
     write(STDOUT_FILENO, "\x1b[H", 3); //Repositions the cursor to the first row and col
+
+    perror(s);
     exit(1);
 }
 /**
@@ -189,6 +191,20 @@ int getWindowSize(int *rows, int *cols) {
         return 0;
     }
 }
+/** ======================== All Editor row manipulation functions  . ===================*/
+
+void editorAppendRow(char *s, size_t len) {
+    editC.row = realloc(editC.row, sizeof(erow) * (editC.num_rows + 1));
+
+    int at = editC.num_rows;
+    editC.row[at].size = len;
+    editC.row[at].chars = malloc(len + 1);
+    memcpy(editC.row[at].chars, s, len);
+    editC.row[at].chars[len] = '\0';
+     editC.num_rows++;
+}
+
+
 /** ======================== All write buffer handling goes here. ===================*/
 struct appendBuf {
     char *buf;
@@ -284,7 +300,7 @@ void editorProcessKeypress() {
     }
 }
 
-/** ====================== Terminal Handling functions ========================== */
+/** ====================== Terminal Handling funct1ions ========================== */
 
 /**
  *  In order to set terminal attributes,we need to do the following:
@@ -299,7 +315,7 @@ void editorProcessKeypress() {
  */
 void enableRawMode(){
     if (tcgetattr(STDIN_FILENO, &editC.orig_termios) == -1)
-        handleError("Problem getting terminical config struct.");
+        handleError("Problem getting terminical co1nfig struct.");
 
     /**
      * Register disableRawMode as a callback when main exits such that
@@ -345,7 +361,7 @@ void editorDrawRows(struct appendBuf *ab) {
     for (i=0; i<editC.screen_rows; i++){
         if (i >= editC.num_rows ) {
             //Display welcome message only of no file to open
-            if(editC.num_rows ==0 && i == editC.screen_rows/3) {
+            if(editC.num_rows ==0 && i == editC.screen_rows / 3) {
                 char welcomeMessage[80];
 
                 int welcomeLen = snprintf(welcomeMessage, sizeof(welcomeMessage),
@@ -367,9 +383,9 @@ void editorDrawRows(struct appendBuf *ab) {
                 appendToBuffer(ab, "~", 1);
             }
         } else {
-            int len = editC.row.size;
+            int len = editC.row[i].size;
             if(len > editC.screen_cols) len = editC.screen_cols;
-            appendToBuffer(ab,editC.row.chars, len);
+            appendToBuffer(ab,editC.row[i].chars, len);
          }
 
         appendToBuffer(ab,"\x1b[K",3); //put a <esc>[K sequence at the end of each line we draw
@@ -421,20 +437,13 @@ void editorOpen(char *filename) {
     ssize_t lineCap = 0;
     ssize_t lineLen;
 
-    lineLen = getline(&line,&lineCap,fp);
-    if (lineLen != -1) {
+    while((lineLen = getline(&line,&lineCap,fp)) != -1) {
         //strip off the newline or carriage return at the end of the line
         //before copying it into our erow
         while(lineLen >0 && (line[lineLen - 1] == '\n' ||
                              line[lineLen - 1] == '\r'))
             lineLen--;
-
-        editC.row.size = lineLen;
-        editC.row.chars = malloc(lineLen + 1);
-        editC.row.size = lineLen;
-        memcpy(editC.row.chars, line, lineLen);
-        editC.row.chars[lineLen] = '\0';
-        editC.num_rows = 1;
+        editorAppendRow(line, lineLen);
     }
     free(line);
     fclose(fp);
@@ -446,6 +455,7 @@ void initEditor() {
     editC.cx = 0;
     editC.cy = 0;
     editC.num_rows = 0;
+    editC.row = NULL;
 
     if (getWindowSize(&editC.screen_rows, &editC.screen_cols) == -1) {
         handleError("Unable to get window size.");
