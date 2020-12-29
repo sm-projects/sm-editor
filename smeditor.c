@@ -2,6 +2,12 @@
  *  A simple editor implementation.
  */
 
+//Add feature test macros
+#define _DEFAULT_SOURCE
+#define _BSD_SOURCE
+#define _GNU_SOURCE
+
+
 #include<sys/ioctl.h>
 #include<unistd.h>
 #include<termios.h>
@@ -10,7 +16,6 @@
 #include<stdio.h>
 #include<errno.h>
 #include<string.h>
-
 
 #define CTRL_KEY(k)  ((k) & 0x1f)
 #define SMEDITOR_VERSION "Alpha-0.0.1"
@@ -339,7 +344,8 @@ void editorDrawRows(struct appendBuf *ab) {
     int i;
     for (i=0; i<editC.screen_rows; i++){
         if (i >= editC.num_rows ) {
-            if(i == editC.screen_rows/3) {
+            //Display welcome message only of no file to open
+            if(editC.num_rows ==0 && i == editC.screen_rows/3) {
                 char welcomeMessage[80];
 
                 int welcomeLen = snprintf(welcomeMessage, sizeof(welcomeMessage),
@@ -407,17 +413,31 @@ void editorClearScreen() {
 }
 
 /** =================== All file IO functions for the editor. =====================*/
-void editorOpen() {
-    char *line = "Hello from SMEditor.";
-    ssize_t lineLen = 25;
+void editorOpen(char *filename) {
+    FILE *fp = fopen(filename,"r");
+    if(!fp) handleError("[SMEditor]: Could not open file.");
 
-    editC.row.size = lineLen;
-    editC.row.chars = malloc(lineLen + 1);
-    editC.row.size = lineLen;
-    memcpy(editC.row.chars, line, lineLen);
-    editC.row.chars[lineLen] = '\0';
-    editC.num_rows = 1;
+    char *line = NULL;
+    ssize_t lineCap = 0;
+    ssize_t lineLen;
 
+    lineLen = getline(&line,&lineCap,fp);
+    if (lineLen != -1) {
+        //strip off the newline or carriage return at the end of the line
+        //before copying it into our erow
+        while(lineLen >0 && (line[lineLen - 1] == '\n' ||
+                             line[lineLen - 1] == '\r'))
+            lineLen--;
+
+        editC.row.size = lineLen;
+        editC.row.chars = malloc(lineLen + 1);
+        editC.row.size = lineLen;
+        memcpy(editC.row.chars, line, lineLen);
+        editC.row.chars[lineLen] = '\0';
+        editC.num_rows = 1;
+    }
+    free(line);
+    fclose(fp);
 }
 
 /** Editor init. */
@@ -431,11 +451,14 @@ void initEditor() {
         handleError("Unable to get window size.");
     }
 }
-int main() {
+
+/* =============================== SMEditor ==============================*/
+int main(int argc, char *argv[]) {
     enableRawMode();
     initEditor();
-    editorOpen();
-
+    if(argc >= 2) {
+        editorOpen(argv[1]);
+    }
     // read one byte at a time and quit reading when key pressed is 'q'
     while (1) {
         editorClearScreen();
