@@ -21,7 +21,10 @@ enum editorKey {
     ARROW_UP ,
     ARROW_DOWN,
     PAGE_UP,
-    PAGE_DOWN
+    PAGE_DOWN,
+    HOME_KEY, // Home key could be sent as <esc>[1~, <esc>[7~, <esc>[H, or <esc>OH
+    END_KEY, //the End key could be sent as <esc>[4~, <esc>[8~, <esc>[F, or <esc>OF
+    DEL_KEY // sends the escape sequence <esc>[3~
 };
 
 // A struct to hold edtor configs and state.
@@ -66,6 +69,7 @@ void disableRawMode() {
  * with '\x1b', '[', followed by an 'A', 'B', 'C', or 'D' depending on which of
  * the four arrow keys was pressed.
  * editorReadKey() to read escape sequences of this form as a single keypress
+ * Detect page up and down and multiple codes for HOME and END keys.
  */
 int editorReadKey() {
     int nread;
@@ -85,8 +89,13 @@ int editorReadKey() {
                 if(read(STDIN_FILENO, &seq[2], 1) != 1) return '\x1b';
                 if(seq[2] == '~') {
                     switch(seq[1]) {
+                        case '1': return HOME_KEY;
+                        case '3': return DEL_KEY;
+                        case '4': return END_KEY;
                         case '5': return PAGE_UP;
                         case '6': return PAGE_DOWN;
+                        case '7': return HOME_KEY;
+                        case '8': return END_KEY;
                     }
                 }
             } else {
@@ -95,7 +104,14 @@ int editorReadKey() {
                     case 'B': return ARROW_DOWN;
                     case 'C': return ARROW_RIGHT;
                     case 'D': return ARROW_LEFT;
+                    case 'H': return HOME_KEY;
+                    case 'F': return END_KEY;
                 }
+            }
+        } else if (seq[0] == '0') {
+            switch(seq[1]) {
+                case 'H': return HOME_KEY;
+                case 'F': return END_KEY;
             }
         }
         return '\x1b';
@@ -244,6 +260,12 @@ void editorProcessKeypress() {
         case ARROW_LEFT:
         case ARROW_RIGHT:
             editorMoveCursor(c);
+            break;
+        case HOME_KEY:
+            editC.cx = 0; //move cursor to start position
+            break;
+        case END_KEY:
+            editC.cx = editC.screen_cols - 1;
             break;
     }
 }
