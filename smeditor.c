@@ -27,12 +27,21 @@ enum editorKey {
     DEL_KEY // sends the escape sequence <esc>[3~
 };
 
+// Struct to store each row  of text in the editor.
+typedef struct erow {
+    int size;
+    char *chars;
+}erow;
+
+
 // A struct to hold edtor configs and state.
 struct editorConfig {
  int cx,cy; //track cursor's position
  //Number of icols and rows in the screen available from ioctl
  int screen_rows;
  int screen_cols;
+ int num_rows;
+ erow row;
  struct termios orig_termios;
 };
 
@@ -329,27 +338,33 @@ void enableRawMode(){
 void editorDrawRows(struct appendBuf *ab) {
     int i;
     for (i=0; i<editC.screen_rows; i++){
-        if(i == editC.screen_rows/3) {
-            char welcomeMessage[80];
+        if (i >= editC.num_rows ) {
+            if(i == editC.screen_rows/3) {
+                char welcomeMessage[80];
 
-            int welcomeLen = snprintf(welcomeMessage, sizeof(welcomeMessage),
-                    "SM-Editor -- version %s", SMEDITOR_VERSION);
+                int welcomeLen = snprintf(welcomeMessage, sizeof(welcomeMessage),
+                        "SM-Editor -- version %s", SMEDITOR_VERSION);
 
-            if(welcomeLen > editC.screen_cols)
-                welcomeLen = editC.screen_cols;
+                if(welcomeLen > editC.screen_cols)
+                    welcomeLen = editC.screen_cols;
 
-            //Center the welcome message on the screeni
-            int padding = (editC.screen_cols - welcomeLen / 2);
+                //Center the welcome message on the screeni
+                int padding = (editC.screen_cols - welcomeLen / 2);
 
-            if(padding) {
-                appendToBuffer(ab,"~",1);
-                padding--;
+                if(padding) {
+                    appendToBuffer(ab,"~",1);
+                    padding--;
+                }
+                while(padding--) appendToBuffer(ab," ",1);
+                appendToBuffer(ab,welcomeMessage,welcomeLen);
+            } else {
+                appendToBuffer(ab, "~", 1);
             }
-            while(padding--) appendToBuffer(ab," ",1);
-            appendToBuffer(ab,welcomeMessage,welcomeLen);
         } else {
-            appendToBuffer(ab, "~", 1);
-        }
+            int len = editC.row.size;
+            if(len > editC.screen_cols) len = editC.screen_cols;
+            appendToBuffer(ab,editC.row.chars, len);
+         }
 
         appendToBuffer(ab,"\x1b[K",3); //put a <esc>[K sequence at the end of each line we draw
         if (i <  editC.screen_rows - 1) {
@@ -391,11 +406,27 @@ void editorClearScreen() {
     bufferFree(&ab);
 }
 
+/** =================== All file IO functions for the editor. =====================*/
+void editorOpen() {
+    char *line = "Hello from SMEditor.";
+    ssize_t lineLen = 25;
+
+    editC.row.size = lineLen;
+    editC.row.chars = malloc(lineLen + 1);
+    editC.row.size = lineLen;
+    memcpy(editC.row.chars, line, lineLen);
+    editC.row.chars[lineLen] = '\0';
+    editC.num_rows = 1;
+
+}
+
 /** Editor init. */
 void initEditor() {
     //Set cursor position to top left corner
     editC.cx = 0;
     editC.cy = 0;
+    editC.num_rows = 0;
+
     if (getWindowSize(&editC.screen_rows, &editC.screen_cols) == -1) {
         handleError("Unable to get window size.");
     }
@@ -403,6 +434,7 @@ void initEditor() {
 int main() {
     enableRawMode();
     initEditor();
+    editorOpen();
 
     // read one byte at a time and quit reading when key pressed is 'q'
     while (1) {
