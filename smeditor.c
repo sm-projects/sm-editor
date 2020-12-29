@@ -29,15 +29,6 @@ struct editorConfig editC;
 /** ================= All terminal handling functions. ==========================*/
 
 /**
- *
- *  We save the original terminal attributes in the orig_termios struct and call
- *  this function to set the user's terminal back to original state.
- */
-void disableRawMode() {
-    tcsetattr(STDIN_FILENO,TCSAFLUSH, &editC.orig_termios);
-}
-
-/**
  * Error handling routine
  * perror() looks at the global erronum and prints out the message
  * provided by the string s
@@ -48,6 +39,16 @@ void handleError(const char *s) {
     write(STDOUT_FILENO, "\x1b[2J",4); //J command erases everything in display
     write(STDOUT_FILENO, "\x1b[H", 3); //Repositions the cursor to the first row and col
     exit(1);
+}
+/**
+ *
+ *  We save the original terminal attributes in the orig_termios struct and call
+ *  this function to set the user's terminal back to original state.
+ */
+void disableRawMode() {
+    if (tcsetattr(STDIN_FILENO,TCSAFLUSH, &editC.orig_termios) == -1){
+        handleError("SMEditor: Failed to diable raw mode.");
+    }
 }
 
 char editorReadKey() {
@@ -75,12 +76,12 @@ int getCursorPosition(int *rows, int *cols) {
     if (write(STDOUT_FILENO, "\x1b[6n",4) != 4) return -1;
 
     while( i < sizeof(buf) - 1 ){
-        if (read(STDIN_FILENO, &buf[i], 1) == 1) break;
+        if (read(STDIN_FILENO, &buf[i], 1) != 1) break;
         if (buf[i] == 'R') break;
         i++;
     }
     buf[i] = '\0';
-    printf("\r\n &buf[i]: '%s'\r\n", &buf[i]);
+    //printf("\r\n &buf[i]: '%s'\r\n", &buf[i]);
 
     if (buf[0] != '\x1b' || buf[1] != '[') return -1;
     if (sscanf(&buf[2], "%d;%d", rows, cols) != 2) return -1;
@@ -155,16 +156,22 @@ void bufferFree(struct appendBuf *ab) {
 void editorMoveCursor(char key) {
     switch(key) {
         case 'a':
+            editC.cy--;  //move left
+            break;
         case 'd':
+            editC.cx++;  //move down
+            break;
         case 'w':
+            editC.cx--; //move up
+            break;
         case 's':
+            editC.cy++; //move right
             break;
     }
 }
 
 void processKeypress() {
     char c = editorReadKey();
-
     switch(c) {
         case CTRL_KEY('q'):
             //Clear screen before exit
@@ -172,8 +179,16 @@ void processKeypress() {
             write(STDOUT_FILENO, "\x1b[H", 3); //Repositions the cursor to the first row and col
             exit(0);
             break;
+        case 'w':
+        case 's':
+        case 'a':
+        case 'd':
+            editorMoveCursor(c);
+            break;
     }
 }
+
+/** ====================== Terminal Handling functions ========================== */
 
 /**
  *  In order to set terminal attributes,we need to do the following:
@@ -216,6 +231,7 @@ void enableRawMode(){
     // This means we will finally be reading input byte-by-byte, instead of line-by-line.
     // Tuen off Ctrl C and Z by setting ISIG flag
     // IEXTEN diables Ctrl V
+    raw.c_cflag |= (CS8);
     raw.c_lflag &= ~(ECHO | ICANON | ISIG | IEXTEN );
     raw.c_cc[VMIN] = 0; //set control charecter flags for read() to wait on bytes read, return afterwards
     raw.c_cc[VTIME] = 1; //set cc VTIME to max wait time for read() before it returns
