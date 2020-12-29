@@ -47,6 +47,7 @@ struct editorConfig {
  int screen_rows;
  int screen_cols;
  int num_rows;
+ int rowoffset; //keep track of what row of the file,the user has scrolled to
  erow *row; //Make it an array of rows in order to store rows read from a file.
  struct termios orig_termios;
 };
@@ -260,7 +261,7 @@ void editorMoveCursor(int key) {
             }
             break;
         case ARROW_DOWN:
-            if(editC.cy != editC.screen_rows - 1) {
+            if(editC.cy <  editC.num_rows) {
                 editC.cy++; //move right
             }
             break;
@@ -355,11 +356,20 @@ void enableRawMode(){
 
 
 /**  Editor output functions. *******************************************/
+void editorScroll() {
+    if (editC.cy < editC.rowoffset) {
+        editC.rowoffset = editC.cy;
+    }
+    if (editC.cy >= editC.rowoffset + editC.screen_rows){
+        editC.rowoffset = editC.cy - editC.screen_rows + 1;
+    }
+}
 
 void editorDrawRows(struct appendBuf *ab) {
     int i;
     for (i=0; i<editC.screen_rows; i++){
-        if (i >= editC.num_rows ) {
+        int filerow = i + editC.rowoffset;
+        if (filerow  >= editC.num_rows ) {
             //Display welcome message only of no file to open
             if(editC.num_rows ==0 && i == editC.screen_rows / 3) {
                 char welcomeMessage[80];
@@ -383,9 +393,9 @@ void editorDrawRows(struct appendBuf *ab) {
                 appendToBuffer(ab, "~", 1);
             }
         } else {
-            int len = editC.row[i].size;
+            int len = editC.row[filerow].size;
             if(len > editC.screen_cols) len = editC.screen_cols;
-            appendToBuffer(ab,editC.row[i].chars, len);
+            appendToBuffer(ab,editC.row[filerow].chars, len);
          }
 
         appendToBuffer(ab,"\x1b[K",3); //put a <esc>[K sequence at the end of each line we draw
@@ -407,7 +417,8 @@ void editorDrawRows(struct appendBuf *ab) {
  * use abAppend(). Lastly, we write() the buffer’s contents out to standard output
  * and free the memory used by the abuf
  */
-void editorClearScreen() {
+void editorRefreshScreen() {
+    editorScroll();
     struct appendBuf ab = BUFFER_INIT;
 
     appendToBuffer(&ab, "\x1b[?25l",6); //Hides the cursor
@@ -417,7 +428,7 @@ void editorClearScreen() {
     editorDrawRows(&ab);
 
     char buf[32];
-    snprintf(buf,sizeof(buf),"\x1b[%d;%dH",editC.cy + 1, editC.cx + 1);
+    snprintf(buf,sizeof(buf),"\x1b[%d;%dH",(editC.cy - editC.rowoffset) + 1, editC.cx + 1);
     appendToBuffer(&ab,buf,strlen(buf));
 
 
@@ -456,6 +467,7 @@ void initEditor() {
     editC.cy = 0;
     editC.num_rows = 0;
     editC.row = NULL;
+    editC.rowoffset = 0;
 
     if (getWindowSize(&editC.screen_rows, &editC.screen_cols) == -1) {
         handleError("Unable to get window size.");
@@ -471,7 +483,7 @@ int main(int argc, char *argv[]) {
     }
     // read one byte at a time and quit reading when key pressed is 'q'
     while (1) {
-        editorClearScreen();
+        editorRefreshScreen();
         editorProcessKeypress();
     }
     return 0;
