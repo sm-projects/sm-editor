@@ -15,6 +15,13 @@
 #define CTRL_KEY(k)  ((k) & 0x1f)
 #define SMEDITOR_VERSION "Alpha-0.0.1"
 
+enum editorKey {
+    ARROW_LEFT = 1000,
+    ARROW_RIGHT ,
+    ARROW_UP ,
+    ARROW_DOWN
+};
+
 // A struct to hold edtor configs and state.
 struct editorConfig {
  int cx,cy; //track cursor's position
@@ -51,14 +58,38 @@ void disableRawMode() {
     }
 }
 
-char editorReadKey() {
+/**
+ * Enable arrow navigation keys. Pressing an arrow key sends multiple bytes as input
+ * to our program. These bytes are in the form of an escape sequence that starts
+ * with '\x1b', '[', followed by an 'A', 'B', 'C', or 'D' depending on which of
+ * the four arrow keys was pressed.
+ * editorReadKey() to read escape sequences of this form as a single keypress
+ */
+int editorReadKey() {
     int nread;
     char c;
 
     while((nread = read(STDIN_FILENO, &c, 1)) != 1){
         if (nread == -1 && errno != EAGAIN) handleError("SMEDITOR: Error reading charecter.");
     }
-    return c;
+    if (c == '\x1b') {
+        char seq[3];
+
+        if(read(STDIN_FILENO, &seq[0], 1) != 1) return '\x1b';
+        if(read(STDIN_FILENO, &seq[1], 1) != 1) return '\x1b';
+
+        if (seq[0] == '[') {
+            switch(seq[1]) {
+                case 'A': return ARROW_UP;
+                case 'B': return ARROW_DOWN;
+                case 'C': return ARROW_RIGHT;
+                case 'D': return ARROW_LEFT;
+            }
+        }
+        return '\x1b';
+    } else {
+        return c;
+    }
 }
 
 /**
@@ -153,25 +184,25 @@ void bufferFree(struct appendBuf *ab) {
 
 /** ===================== All keyboard input handling functions. =====================*/
 
-void editorMoveCursor(char key) {
+void editorMoveCursor(int key) {
     switch(key) {
-        case 'a':
-            editC.cy--;  //move left
+        case ARROW_LEFT:
+            editC.cx--;  //move left
             break;
-        case 'd':
-            editC.cx++;  //move down
+        case ARROW_RIGHT:
+            editC.cx++;  //move right
             break;
-        case 'w':
-            editC.cx--; //move up
+        case ARROW_UP:
+            editC.cy--; //move up
             break;
-        case 's':
+        case ARROW_DOWN:
             editC.cy++; //move right
             break;
     }
 }
 
-void processKeypress() {
-    char c = editorReadKey();
+void editorProcessKeypress() {
+    int  c = editorReadKey();
     switch(c) {
         case CTRL_KEY('q'):
             //Clear screen before exit
@@ -179,10 +210,10 @@ void processKeypress() {
             write(STDOUT_FILENO, "\x1b[H", 3); //Repositions the cursor to the first row and col
             exit(0);
             break;
-        case 'w':
-        case 's':
-        case 'a':
-        case 'd':
+        case ARROW_UP:
+        case ARROW_DOWN:
+        case ARROW_LEFT:
+        case ARROW_RIGHT:
             editorMoveCursor(c);
             break;
     }
@@ -298,7 +329,7 @@ void editorClearScreen() {
     editorDrawRows(&ab);
 
     char buf[32];
-    snprintf(buf,sizeof(buf),"\x1b[%d;%dH",editC.cx + 1, editC.cy + 1);
+    snprintf(buf,sizeof(buf),"\x1b[%d;%dH",editC.cy + 1, editC.cx + 1);
     appendToBuffer(&ab,buf,strlen(buf));
 
 
@@ -325,7 +356,7 @@ int main() {
     // read one byte at a time and quit reading when key pressed is 'q'
     while (1) {
         editorClearScreen();
-        processKeypress();
+        editorProcessKeypress();
     }
     return 0;
 }
