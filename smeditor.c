@@ -48,6 +48,7 @@ struct editorConfig {
  int screen_cols;
  int num_rows;
  int rowoffset; //keep track of what row of the file,the user has scrolled to
+ int coloffset; //keep track of the contents of a row going horizontally
  erow *row; //Make it an array of rows in order to store rows read from a file.
  struct termios orig_termios;
 };
@@ -93,7 +94,8 @@ int editorReadKey() {
     char c;
 
     while((nread = read(STDIN_FILENO, &c, 1)) != 1){
-        if (nread == -1 && errno != EAGAIN) handleError("SMEDITOR: Error reading charecter.");
+        if (nread == -1 && errno != EAGAIN)
+            handleError("SMEDITOR: Error reading charecter.");
     }
     if (c == '\x1b') {
         char seq[3];
@@ -244,15 +246,29 @@ void bufferFree(struct appendBuf *ab) {
 /** ===================== All keyboard input handling functions. =====================*/
 
 void editorMoveCursor(int key) {
+    // check if the cursor is on an actual line. If it is, then the row
+    // variable will point to the erow that the cursor is on, and we?ll
+    // check whether E.cx is to the left of the end of that line before we
+    // allow the cursor to move to the right.
+    erow *row = (editC.cy >= editC.num_rows) ? NULL : &editC.row[editC.cy];
+
     switch(key) {//the if checks prevent the cursor from going off the screen
         case ARROW_LEFT:
             if (editC.cx != 0) {
                 editC.cx--;  //move left
+            } else if (editC.cy > 0){
+                //allow user to move to the end of  the previous line
+                editC.cy--;
+                editC.cx = editC.row[editC.cy].size;
             }
             break;
         case ARROW_RIGHT:
-            if (editC.cx != editC.screen_cols - 1) {
+            //Allow moving right at the end of a line
+            if (row  && editC.cx < row->size) {
                 editC.cx++;  //move right
+            }else if(row && editC.cx == row->size) {
+               editC.cy++;
+                editC.cx = 0;
             }
             break;
         case ARROW_UP:
@@ -265,6 +281,14 @@ void editorMoveCursor(int key) {
                 editC.cy++; //move right
             }
             break;
+    }
+    // set row again, since E.cy could point to a different line than it did before.
+    // We then set E.cx to the end of that line if E.cx is to the right of the end
+    // of that line. Also note that we consider a NULL line to be of length 0,
+    row = (editC.cy >= editC.num_rows) ? NULL : &editC.row[editC.cy];
+    int rowlen = row ? row->size : 0;
+    if(editC.cx > rowlen){
+        editC.cx = rowlen;
     }
 }
 
@@ -363,6 +387,12 @@ void editorScroll() {
     if (editC.cy >= editC.rowoffset + editC.screen_rows){
         editC.rowoffset = editC.cy - editC.screen_rows + 1;
     }
+    if (editC.cx <  editC.coloffset ){
+        editC.coloffset = editC.cx;
+    }
+    if (editC.cx >= editC.coloffset + editC.screen_cols){
+        editC.coloffset = editC.cx - editC.screen_cols + 1;
+    }
 }
 
 void editorDrawRows(struct appendBuf *ab) {
@@ -393,9 +423,10 @@ void editorDrawRows(struct appendBuf *ab) {
                 appendToBuffer(ab, "~", 1);
             }
         } else {
-            int len = editC.row[filerow].size;
+            int len = editC.row[filerow].size -editC.coloffset;
+            if (len < 0) len =0; //prevents len from being negative
             if(len > editC.screen_cols) len = editC.screen_cols;
-            appendToBuffer(ab,editC.row[filerow].chars, len);
+            appendToBuffer(ab,&editC.row[filerow].chars[editC.coloffset], len);
          }
 
         appendToBuffer(ab,"\x1b[K",3); //put a <esc>[K sequence at the end of each line we draw
@@ -428,7 +459,8 @@ void editorRefreshScreen() {
     editorDrawRows(&ab);
 
     char buf[32];
-    snprintf(buf,sizeof(buf),"\x1b[%d;%dH",(editC.cy - editC.rowoffset) + 1, editC.cx + 1);
+    snprintf(buf,sizeof(buf),"\x1b[%d;%dH",(editC.cy - editC.rowoffset) + 1,
+                                           (editC.cx - editC.coloffset) + 1);
     appendToBuffer(&ab,buf,strlen(buf));
 
 
@@ -468,6 +500,7 @@ void initEditor() {
     editC.num_rows = 0;
     editC.row = NULL;
     editC.rowoffset = 0;
+    editC.coloffset = 0;
 
     if (getWindowSize(&editC.screen_rows, &editC.screen_cols) == -1) {
         handleError("Unable to get window size.");
