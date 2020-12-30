@@ -20,6 +20,7 @@
 
 #define CTRL_KEY(k)  ((k) & 0x1f)
 #define SMEDITOR_VERSION "Alpha-0.0.1"
+#define SMEDITOR_TAB_STOP 8
 
 enum editorKey {
     ARROW_LEFT = 1000,
@@ -36,7 +37,9 @@ enum editorKey {
 // Struct to store each row  of text in the editor.
 typedef struct erow {
     int size;
+    int rsize; //length of the render string
     char *chars;
+    char *render //contains actual charecters to draw on the screen.
 }erow;
 
 
@@ -195,6 +198,37 @@ int getWindowSize(int *rows, int *cols) {
     }
 }
 /** ======================== All Editor row manipulation functions  . ===================*/
+/**
+ * This function uses the chars string of an erow to fill in the contents
+ * of the render string
+ *
+ */
+void editorUpdateRow(erow *row) {
+
+    int tabs = 0;
+    int j;
+
+    //Count charecters  chars in order to allocate memeory for chars
+    for(j=0; j < row->size; j++){
+        if (row->chars[j] == '\t') tabs++;
+    }
+    free(row->render);
+    row->render = malloc(row->size + tabs*(SMEDITOR_TAB_STOP - 1) + 1);
+
+    int idx = 0;
+
+    for(j=0;j<row->size;j++){
+        //if tab encountered fill up render with spaces instead
+        if(row->chars[j] == '\t') {
+          row->render[idx++] = ' ';
+          while (idx % SMEDITOR_TAB_STOP != 0) row->render[idx++] = ' ';
+        } else {
+            row->render[idx++] = row->chars[j];
+        }
+    }
+    row->render[idx] = '\0';
+    row->rsize = idx;
+}
 
 void editorAppendRow(char *s, size_t len) {
     editC.row = realloc(editC.row, sizeof(erow) * (editC.num_rows + 1));
@@ -204,7 +238,12 @@ void editorAppendRow(char *s, size_t len) {
     editC.row[at].chars = malloc(len + 1);
     memcpy(editC.row[at].chars, s, len);
     editC.row[at].chars[len] = '\0';
-     editC.num_rows++;
+
+    editC.row[at].rsize = 0;
+    editC.row[at].render = NULL;
+    editorUpdateRow(&editC.row[at]);
+
+    editC.num_rows++;
 }
 
 
@@ -423,10 +462,10 @@ void editorDrawRows(struct appendBuf *ab) {
                 appendToBuffer(ab, "~", 1);
             }
         } else {
-            int len = editC.row[filerow].size -editC.coloffset;
+            int len = editC.row[filerow].rsize - editC.coloffset;
             if (len < 0) len =0; //prevents len from being negative
             if(len > editC.screen_cols) len = editC.screen_cols;
-            appendToBuffer(ab,&editC.row[filerow].chars[editC.coloffset], len);
+            appendToBuffer(ab,&editC.row[filerow].render[editC.coloffset], len);
          }
 
         appendToBuffer(ab,"\x1b[K",3); //put a <esc>[K sequence at the end of each line we draw
