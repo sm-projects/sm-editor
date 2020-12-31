@@ -1,5 +1,5 @@
 smeditor: smeditor.c
-	$(CC) smeditor.c -o smeditor -Wall -Wextra -pedantic -std=c99
+	$(CC) smeditor.c -o smeditor -Wall -Wextra -pedantic -ggdb -std=c99
 
 clean:
 	rm  -rf smeditor

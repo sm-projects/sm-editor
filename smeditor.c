@@ -53,6 +53,7 @@ struct editorConfig {
  int rowoffset; //keep track of what row of the file,the user has scrolled to
  int coloffset; //keep track of the contents of a row going horizontally
  erow *row; //Make it an array of rows in order to store rows read from a file.
+ char *filename; //record the name of the file opened
  struct termios orig_termios;
 };
 
@@ -469,12 +470,44 @@ void editorDrawRows(struct appendBuf *ab) {
          }
 
         appendToBuffer(ab,"\x1b[K",3); //put a <esc>[K sequence at the end of each line we draw
-        if (i <  editC.screen_rows - 1) {
-            appendToBuffer(ab, "\r\n", 2);
-        }
+        //Draw a status bar
+        //if (i <  editC.screen_rows - 1) {
+        appendToBuffer(ab, "\r\n", 2);
+        //}
     }
 }
 
+/**
+ * Draw a status bar at the bottom of the screen editor
+ */
+void editorDrawStatusbar(struct appendBuf *ab) {
+    //Use the 'm' command to causes the text printed after it to be
+    //printed with various possible attributes including
+    //bold (1), underscore (4), blink (5), and inverted colors (7).
+    //E.g. specify all of these attributes using the command <esc>[1;4;5;7m.
+    //An argument of 0 clears all attributes, and is the default argument,
+    //so we use <esc>[m to go back to normal text formatting.
+    appendToBuffer(ab, "\x1b[7m", 4);
+    char status[80], rstatus[80];
+
+    int len = snprintf(status,sizeof(status), "%.20s - %d lines",
+                        editC.filename ? editC.filename :  "[NO NAME]", editC.num_rows);
+    //show the current line number
+    int rlen = snprintf(rstatus, sizeof(rstatus), "%d/%d", editC.cy + 1, editC.num_rows);
+    if(len > editC.screen_cols) len = editC.screen_cols;
+    appendToBuffer(ab, status, len);
+
+    while(len < editC.screen_cols) {
+        if(editC.screen_cols - len == rlen) {
+            appendToBuffer(ab, rstatus, rlen);
+            break;
+        } else {
+            appendToBuffer(ab, " ",1);
+            len++;
+        }
+    }
+    appendToBuffer(ab, "\x1b[m ", 3);
+}
 /**
  * In order to clear the screen, we are writing an escape sequence to the terminal.
  * Escape sequences always start with an escape character (27) followed by a [ character.
@@ -496,6 +529,7 @@ void editorRefreshScreen() {
     appendToBuffer(&ab, "\x1b[H", 3); //Repositions the cursor to the first row and col
 
     editorDrawRows(&ab);
+    editorDrawStatusbar(&ab);
 
     char buf[32];
     snprintf(buf,sizeof(buf),"\x1b[%d;%dH",(editC.cy - editC.rowoffset) + 1,
@@ -512,6 +546,9 @@ void editorRefreshScreen() {
 
 /** =================== All file IO functions for the editor. =====================*/
 void editorOpen(char *filename) {
+    free(editC.filename);
+    //Allocate memory and make a copy of the given filename using string function strdup
+    editC.filename = strdup(filename);
     FILE *fp = fopen(filename,"r");
     if(!fp) handleError("[SMEditor]: Could not open file.");
 
@@ -540,10 +577,13 @@ void initEditor() {
     editC.row = NULL;
     editC.rowoffset = 0;
     editC.coloffset = 0;
+    editC.filename = NULL;
 
     if (getWindowSize(&editC.screen_rows, &editC.screen_cols) == -1) {
         handleError("Unable to get window size.");
     }
+    //decrement number of rows available to editor in order to make room for status bar
+    editC.screen_rows -= 1;
 }
 
 /* =============================== SMEditor ==============================*/
