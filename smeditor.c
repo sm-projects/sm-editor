@@ -472,8 +472,8 @@ void editorDrawRows(struct appendBuf *ab) {
             if(len > editC.screen_cols) len = editC.screen_cols;
             appendToBuffer(ab,&editC.row[filerow].render[editC.coloffset], len);
          }
-
-        appendToBuffer(ab,"\x1b[K",3); //put a <esc>[K sequence at the end of each line we draw
+        //put a <esc>[K sequence at the end of each line we draw
+        appendToBuffer(ab,"\x1b[K",3);
         //Draw a status bar
         //if (i <  editC.screen_rows - 1) {
         appendToBuffer(ab, "\r\n", 2);
@@ -526,12 +526,12 @@ void editorSetStatusMsg(const char *fmt, ...) {
     editC.status_time = time(NULL);
 }
 /**
- *Draws status bar message.``
+ *Draws status bar message.
  *
  */
 void editorDrawMsgBar(struct appendBuf *ab) {
     //Clear the message bar
-    appendToBuffer(ab, "\x1b[k", 3);
+    appendToBuffer(ab, "\x1b[K", 3);
     int len =  strlen(editC.statusMesg);
     if (len > editC.screen_cols) len = editC.screen_cols;
     if (len && (time(NULL) - editC.status_time) < 5)
@@ -627,7 +627,7 @@ int main(int argc, char *argv[]) {
     if(argc >= 2) {
         editorOpen(argv[1]);
     }
-    editorSetStatusMsg("SMEditor- HELP: Press Ctrl-q to quit.");
+    editorSetStatusMsg("SMEditor-HELP: Press Ctrl-q to quit.");
     // read one byte at a time and quit reading when key pressed is 'q'
     while (1) {
         editorRefreshScreen();
