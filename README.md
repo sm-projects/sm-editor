@@ -2,6 +2,7 @@
 A text editor from scratch
 
 
+Notes
 
 1. [Kilo](http://viewsourcecode.org/snaptoken/kilo/index.html)
 2. [Nano](https://www.nano-editor.org/git.php)
