@@ -13,10 +13,12 @@
 #include<unistd.h>
 #include<termios.h>
 #include<stdlib.h>
+#include<stdarg.h>
 #include<ctype.h>
 #include<stdio.h>
 #include<errno.h>
 #include<string.h>
+#include<time.h>
 
 #define CTRL_KEY(k)  ((k) & 0x1f)
 #define SMEDITOR_VERSION "Alpha-0.0.1"
@@ -54,6 +56,8 @@ struct editorConfig {
  int coloffset; //keep track of the contents of a row going horizontally
  erow *row; //Make it an array of rows in order to store rows read from a file.
  char *filename; //record the name of the file opened
+ char  statusMesg[80];
+ time_t status_time;
  struct termios orig_termios;
 };
 
@@ -507,6 +511,31 @@ void editorDrawStatusbar(struct appendBuf *ab) {
         }
     }
     appendToBuffer(ab, "\x1b[m ", 3);
+    appendToBuffer(ab, "\r\n ", 2);
+}
+
+/**
+ * Shows help and editor prompt messages to the users
+ */
+void editorSetStatusMsg(const char *fmt, ...) {
+    va_list ap;
+
+    va_start(ap,fmt);
+    vsnprintf(editC.statusMesg, sizeof(editC.statusMesg), fmt, ap);
+    va_end(ap);
+    editC.status_time = time(NULL);
+}
+/**
+ *Draws status bar message.``
+ *
+ */
+void editorDrawMsgBar(struct appendBuf *ab) {
+    //Clear the message bar
+    appendToBuffer(ab, "\x1b[k", 3);
+    int len =  strlen(editC.statusMesg);
+    if (len > editC.screen_cols) len = editC.screen_cols;
+    if (len && (time(NULL) - editC.status_time) < 5)
+        appendToBuffer(ab, editC.statusMesg, len);
 }
 /**
  * In order to clear the screen, we are writing an escape sequence to the terminal.
@@ -530,6 +559,7 @@ void editorRefreshScreen() {
 
     editorDrawRows(&ab);
     editorDrawStatusbar(&ab);
+    editorDrawMsgBar(&ab);
 
     char buf[32];
     snprintf(buf,sizeof(buf),"\x1b[%d;%dH",(editC.cy - editC.rowoffset) + 1,
@@ -578,12 +608,16 @@ void initEditor() {
     editC.rowoffset = 0;
     editC.coloffset = 0;
     editC.filename = NULL;
+    editC.statusMesg[0] = '\0';
+    editC.status_time = 0;
+
 
     if (getWindowSize(&editC.screen_rows, &editC.screen_cols) == -1) {
         handleError("Unable to get window size.");
     }
     //decrement number of rows available to editor in order to make room for status bar
-    editC.screen_rows -= 1;
+    //make room for status message as well so we need 2 rows
+    editC.screen_rows -= 2;
 }
 
 /* =============================== SMEditor ==============================*/
@@ -593,6 +627,7 @@ int main(int argc, char *argv[]) {
     if(argc >= 2) {
         editorOpen(argv[1]);
     }
+    editorSetStatusMsg("SMEditor- HELP: Press Ctrl-q to quit.");
     // read one byte at a time and quit reading when key pressed is 'q'
     while (1) {
         editorRefreshScreen();
