@@ -19,6 +19,7 @@
 #include<errno.h>
 #include<string.h>
 #include<time.h>
+#include<fcntl.h>
 
 #define CTRL_KEY(k)  ((k) & 0x1f)
 #define SMEDITOR_VERSION "Alpha-0.0.1"
@@ -42,7 +43,7 @@ typedef struct erow {
     int size;
     int rsize; //length of the render string
     char *chars;
-    char *render //contains actual charecters to draw on the screen.
+    char *render; //contains actual charecters to draw on the screen.
 }erow;
 
 
@@ -87,6 +88,57 @@ void handleError(const char *s) {
 void disableRawMode() {
     if (tcsetattr(STDIN_FILENO,TCSAFLUSH, &editC.orig_termios) == -1){
         handleError("SMEditor: Failed to diable raw mode.");
+    }
+}
+
+/**
+ *  In order to set terminal attributes,we need to do the following:
+ *   1. Call tcgetattr to read the attributes into a struct
+ *   2. Modify attributes within the struct
+ *   3. Pass the modified attributes to  write the new terminal attributes using tcsetattr func
+ *   atexit() comes from <stdlib.h>. We use it to register our disableRawMode() function to be
+ *   called automatically when the program exits, whether it exits by returning from main(),
+ *   or by calling the exit() function.
+ *   Note: there is no simple way of switching from "cooked mode" to "raw mode" apart from manupilating
+ *   a number of flags in terminal attributes structure.
+ */
+void enableRawMode(){
+    if (tcgetattr(STDIN_FILENO, &editC.orig_termios) == -1)
+        handleError("Problem getting terminical co1nfig struct.");
+
+    /**
+     * Register disableRawMode as a callback when main exits such that
+     * we can leave everything.
+     */
+    atexit(disableRawMode);
+
+    struct termios  raw  = editC.orig_termios;
+    /*
+     * ECHO is a bitflag, defined as 00000000000000000000000000001000 in binary.
+     * We use the bitwise-NOT operator (~) on this value to get 11111111111111111111111111110111.
+     * We then bitwise-AND this value with the flags field, which forces the fourth bit in the
+     * flags field to become 0, and causes every other bit to retain its current value.
+     *  Also convert carrige return to new line by turning on ICRNL flag.
+     *  Turn off a few other flags;
+     *  BRKINT - allows a break condition to trigger a SIGINT
+     *  INPCK - turns off parity checking
+     *  ISTRIP
+     */
+    raw.c_iflag &=  ~(BRKINT | INPCK | ISTRIP | ICRNL | IXON); //turns of Ctrl S and Q
+
+    /** Turn off all output processing by turning off the OPOST flag. */
+    raw.c_oflag &= ~(OPOST);
+    // There is an ICANON flag that allows us to turn off canonical mode.
+    // This means we will finally be reading input byte-by-byte, instead of line-by-line.
+    // Tuen off Ctrl C and Z by setting ISIG flag
+    // IEXTEN diables Ctrl V
+    raw.c_cflag |= (CS8);
+    raw.c_lflag &= ~(ECHO | ICANON | ISIG | IEXTEN );
+    raw.c_cc[VMIN] = 0; //set control charecter flags for read() to wait on bytes read, return afterwards
+    raw.c_cc[VTIME] = 1; //set cc VTIME to max wait time for read() before it returns
+
+    if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == -1) {
+        handleError("Error changing terminal config attributes.");
     }
 }
 
@@ -284,7 +336,84 @@ void editorInsertChar(int c) {
     editorInsertCharAt(&editC.row[editC.cy], editC.cx, c);
     editC.cx++;
 }
+/** ======================== File IO functions ===================================== */
 
+/**
+ *  converts our array of erow structs into a single string that is ready
+ *  to be written out to a file.
+ */
+char * editorRowsToString(int *buflen) {
+    int totlen = 0;
+    int j;
+    //First we add up the lengths of each row of text, adding 1 to each one
+    //for the newline character we?ll add to the end of each line.
+    for(j=0;j<editC.num_rows;j++) {
+        totlen += editC.row[j].size + 1;
+    }
+    //Save the total length into buflen, to tell the caller how long the string is
+    *buflen = totlen;
+
+    char *buf = malloc(totlen);
+    char *p = buf;
+
+    for(j=0; j<editC.num_rows;j++) {
+        memcpy(p, editC.row[j].chars,editC.row[j].size);
+        p += editC.row[j].size;
+        *p = '\n';
+        p++;
+    }
+    //return buf, expecting the caller to free() the memory
+    return buf;
+}
+void editorOpen(char *filename) {
+    free(editC.filename);
+    //Allocate memory and make a copy of the given filename using string function strdup
+    editC.filename = strdup(filename);
+    FILE *fp = fopen(filename,"r");
+    if(!fp) handleError("[SMEditor]: Could not open file.");
+
+    char *line = NULL;
+    ssize_t lineCap = 0;
+    ssize_t lineLen;
+
+    while((lineLen = getline(&line,&lineCap,fp)) != -1) {
+        //strip off the newline or carriage return at the end of the line
+        //before copying it into our erow
+        while(lineLen >0 && (line[lineLen - 1] == '\n' ||
+                             line[lineLen - 1] == '\r'))
+            lineLen--;
+        editorAppendRow(line, lineLen);
+    }
+    free(line);
+    fclose(fp);
+}
+/**
+ * Note: The normal way to overwrite a file is to pass the O_TRUNC flag to open(),
+ * which truncates the file completely, making it an empty file, before writing the
+ * new data into it.
+ * By truncating the file ourselves to the same length as the data we are planning to write
+ * into it, we are making the whole overwriting operation a little bit safer in case the
+ * ftruncate() call succeeds but the write() call fails. In that case, the file would
+ * still contain most of the data it had before. But if the file was truncated completely
+ * by the open() call and then the write() failed, you'd  end up with all of your data lost
+ *
+ * More advanced editors will write to a new, temporary file, and then rename that file
+ * to the actual file the user wants to overwrite, and they?ll carefully check for errors
+ * through the whole process.
+ *
+ */
+void editorSave() {
+    if (editC.filename == NULL) return;
+
+    int len;
+    char *buf = editorRowsToString(&len);
+
+    int fd = open(editC.filename, O_RDWR | O_CREAT, 0644);
+    ftruncate(fd,len); //setxs the file size to the specified length.
+    write(fd,buf,len);
+    close(fd);
+    free(buf);
+}
 /** ======================== All write buffer handling goes here. ===================*/
 struct appendBuf {
     char *buf;
@@ -378,6 +507,9 @@ void editorProcessKeypress() {
             write(STDOUT_FILENO, "\x1b[H", 3); //Repositions the cursor to the first row and col
             exit(0);
             break;
+        case CTRL_KEY('s'):
+            editorSave();
+            break;
         case '\r':
             //TODO
             break;
@@ -414,60 +546,6 @@ void editorProcessKeypress() {
             break;
     }
 }
-
-/** ====================== Terminal Handling funct1ions ========================== */
-
-/**
- *  In order to set terminal attributes,we need to do the following:
- *   1. Call tcgetattr to read the attributes into a struct
- *   2. Modify attributes within the struct
- *   3. Pass the modified attributes to  write the new terminal attributes using tcsetattr func
- *   atexit() comes from <stdlib.h>. We use it to register our disableRawMode() function to be
- *   called automatically when the program exits, whether it exits by returning from main(),
- *   or by calling the exit() function.
- *   Note: there is no simple way of switching from "cooked mode" to "raw mode" apart from manupilating
- *   a number of flags in terminal attributes structure.
- */
-void enableRawMode(){
-    if (tcgetattr(STDIN_FILENO, &editC.orig_termios) == -1)
-        handleError("Problem getting terminical co1nfig struct.");
-
-    /**
-     * Register disableRawMode as a callback when main exits such that
-     * we can leave everything.
-     */
-    atexit(disableRawMode);
-
-    struct termios  raw  = editC.orig_termios;
-    /*
-     * ECHO is a bitflag, defined as 00000000000000000000000000001000 in binary.
-     * We use the bitwise-NOT operator (~) on this value to get 11111111111111111111111111110111.
-     * We then bitwise-AND this value with the flags field, which forces the fourth bit in the
-     * flags field to become 0, and causes every other bit to retain its current value.
-     *  Also convert carrige return to new line by turning on ICRNL flag.
-     *  Turn off a few other flags;
-     *  BRKINT - allows a break condition to trigger a SIGINT
-     *  INPCK - turns off parity checking
-     *  ISTRIP
-     */
-    raw.c_iflag &=  ~(BRKINT | INPCK | ISTRIP | ICRNL | IXON); //turns of Ctrl S and Q
-
-    /** Turn off all output processing by turning off the OPOST flag. */
-    raw.c_oflag &= ~(OPOST);
-    // There is an ICANON flag that allows us to turn off canonical mode.
-    // This means we will finally be reading input byte-by-byte, instead of line-by-line.
-    // Tuen off Ctrl C and Z by setting ISIG flag
-    // IEXTEN diables Ctrl V
-    raw.c_cflag |= (CS8);
-    raw.c_lflag &= ~(ECHO | ICANON | ISIG | IEXTEN );
-    raw.c_cc[VMIN] = 0; //set control charecter flags for read() to wait on bytes read, return afterwards
-    raw.c_cc[VTIME] = 1; //set cc VTIME to max wait time for read() before it returns
-
-    if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == -1) {
-        handleError("Error changing terminal config attributes.");
-    }
-}
-
 
 /**  Editor output functions. *******************************************/
 void editorScroll() {
@@ -618,30 +696,6 @@ void editorRefreshScreen() {
 
     write(STDOUT_FILENO,ab.buf, ab.len);
     bufferFree(&ab);
-}
-
-/** =================== All file IO functions for the editor. =====================*/
-void editorOpen(char *filename) {
-    free(editC.filename);
-    //Allocate memory and make a copy of the given filename using string function strdup
-    editC.filename = strdup(filename);
-    FILE *fp = fopen(filename,"r");
-    if(!fp) handleError("[SMEditor]: Could not open file.");
-
-    char *line = NULL;
-    ssize_t lineCap = 0;
-    ssize_t lineLen;
-
-    while((lineLen = getline(&line,&lineCap,fp)) != -1) {
-        //strip off the newline or carriage return at the end of the line
-        //before copying it into our erow
-        while(lineLen >0 && (line[lineLen - 1] == '\n' ||
-                             line[lineLen - 1] == '\r'))
-            lineLen--;
-        editorAppendRow(line, lineLen);
-    }
-    free(line);
-    fclose(fp);
 }
 
 /** Editor init. */
