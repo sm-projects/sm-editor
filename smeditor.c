@@ -25,6 +25,7 @@
 #define SMEDITOR_TAB_STOP 8
 
 enum editorKey {
+    BACKSPACE = 127, //ASCII value
     ARROW_LEFT = 1000,
     ARROW_RIGHT ,
     ARROW_UP ,
@@ -251,6 +252,38 @@ void editorAppendRow(char *s, size_t len) {
     editC.num_rows++;
 }
 
+/**
+ * Allows the user to edit the opened file, one char at a time.
+ */
+void editorInsertCharAt(erow *row, int at, int c) {
+    //validate at, which is the index we want to insert the character into
+    //at allowed to go past the end of the string in order to insert at the end
+    //of the row
+    if (at < 0 || at > row->size) at = row->size;
+    // allocate one more byte for the chars of the erow
+    // (we add 2 because we also have to make room for the null byte),
+    // and use memmove() to make room for the new character.
+    row->chars = realloc(row->chars, row->size + 2); // Add 2 to make room for null byte.
+    //use memmove to make room for the new char.
+    memmove(&row->chars[at + 1], &row->chars[at], row->size - at + 1);
+    row->size++;
+    row->chars[at] = c;
+    editorUpdateRow(row);
+}
+
+/** i==================================== editor operations. ===================
+ *  contains functions that we?ll call from editorProcessKeypress() when we?re
+ *  mapping keypresses to various text editing operations
+ */
+void editorInsertChar(int c) {
+    //If editC.cy == editC.numrows, then the cursor is on the tilde line after
+    //the end of the file, so we need to append a new row
+    if (editC.cy == editC.num_rows) {
+        editorAppendRow("",0);
+    }
+    editorInsertCharAt(&editC.row[editC.cy], editC.cx, c);
+    editC.cx++;
+}
 
 /** ======================== All write buffer handling goes here. ===================*/
 struct appendBuf {
@@ -345,6 +378,9 @@ void editorProcessKeypress() {
             write(STDOUT_FILENO, "\x1b[H", 3); //Repositions the cursor to the first row and col
             exit(0);
             break;
+        case '\r':
+            //TODO
+            break;
         case PAGE_UP:
         case PAGE_DOWN:
             {
@@ -365,6 +401,16 @@ void editorProcessKeypress() {
             break;
         case END_KEY:
             editC.cx = editC.screen_cols - 1;
+            break;
+        case BACKSPACE:
+        case CTRL_KEY('h'):
+        case DEL_KEY:
+            /** TODO */
+        case CTRL_KEY('l'):
+        case '\x1b':
+            break;
+        default:
+            editorInsertChar(c);
             break;
     }
 }
