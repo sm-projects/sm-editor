@@ -24,6 +24,7 @@
 #define CTRL_KEY(k)  ((k) & 0x1f)
 #define SMEDITOR_VERSION "Alpha-0.0.1"
 #define SMEDITOR_TAB_STOP 8
+#define SMEDITOR_QUIT_TIMES 3;
 
 enum editorKey {
     BACKSPACE = 127, //ASCII value
@@ -60,10 +61,14 @@ struct editorConfig {
  char *filename; //record the name of the file opened
  char  statusMesg[80];
  time_t status_time;
+ int dirtyFlag; //Keep track of any changes made to file since retrieved from disk
  struct termios orig_termios;
 };
 
 struct editorConfig editC;
+
+/*** prototypes ***/
+void editorSetStatusMessage(const char *fmt, ...);
 
 /** ================= All terminal handling functions. ==========================*/
 
@@ -302,6 +307,7 @@ void editorAppendRow(char *s, size_t len) {
     editorUpdateRow(&editC.row[at]);
 
     editC.num_rows++;
+    editC.dirtyFlag++;
 }
 
 /**
@@ -321,6 +327,7 @@ void editorInsertCharAt(erow *row, int at, int c) {
     row->size++;
     row->chars[at] = c;
     editorUpdateRow(row);
+    editC.dirtyFlag++;
 }
 
 /** i==================================== editor operations. ===================
@@ -386,6 +393,7 @@ void editorOpen(char *filename) {
     }
     free(line);
     fclose(fp);
+    editC.dirtyFlag = 0;
 }
 /**
  * Note: The normal way to overwrite a file is to pass the O_TRUNC flag to open(),
@@ -409,10 +417,19 @@ void editorSave() {
     char *buf = editorRowsToString(&len);
 
     int fd = open(editC.filename, O_RDWR | O_CREAT, 0644);
-    ftruncate(fd,len); //setxs the file size to the specified length.
-    write(fd,buf,len);
-    close(fd);
+    if(fd != -1) {
+        if(ftruncate(fd,len) != -1) {//sets the file size to the specified length.
+            write(fd,buf,len);
+            close(fd);
+            free(buf);
+            editC.dirtyFlag = 0;
+            editorSetStatusMsg("%d bytes written to disk.", len);
+            return;
+        }
+        close(fd);
+    }
     free(buf);
+    editorSetStatusMsg("Failed to save file to disk: %s", strerror(errno));
 }
 /** ======================== All write buffer handling goes here. ===================*/
 struct appendBuf {
@@ -498,10 +515,22 @@ void editorMoveCursor(int key) {
     }
 }
 
+/**
+ * Main handler for all key press events
+ *
+ */
 void editorProcessKeypress() {
+
+    static int quitTimes = SMEDITOR_QUIT_TIMES;
     int  c = editorReadKey();
     switch(c) {
         case CTRL_KEY('q'):
+            if (editC.dirtyFlag && quitTimes > 0) {
+                editorSetStatusMsg("WARNING!! File has unsaved changes. "
+                        "Press Ctrl-q %d more times to quit.", quitTimes);
+                quitTimes--;
+                return;
+            }
             //Clear screen before exit
             write(STDOUT_FILENO, "\x1b[2J",4); //J command erases everything in display
             write(STDOUT_FILENO, "\x1b[H", 3); //Repositions the cursor to the first row and col
@@ -545,6 +574,7 @@ void editorProcessKeypress() {
             editorInsertChar(c);
             break;
     }
+    quitTimes = SMEDITOR_QUIT_TIMES;
 }
 
 /**  Editor output functions. *******************************************/
@@ -618,8 +648,9 @@ void editorDrawStatusbar(struct appendBuf *ab) {
     appendToBuffer(ab, "\x1b[7m", 4);
     char status[80], rstatus[80];
 
-    int len = snprintf(status,sizeof(status), "%.20s - %d lines",
-                        editC.filename ? editC.filename :  "[NO NAME]", editC.num_rows);
+    int len = snprintf(status,sizeof(status), "%.20s - %d lines %s",
+                        editC.filename ? editC.filename :  "[NO NAME]", editC.num_rows,
+                        editC.dirtyFlag ? "(file modified)" : "Unchanged");
     //show the current line number
     int rlen = snprintf(rstatus, sizeof(rstatus), "%d/%d", editC.cy + 1, editC.num_rows);
     if(len > editC.screen_cols) len = editC.screen_cols;
@@ -710,6 +741,7 @@ void initEditor() {
     editC.filename = NULL;
     editC.statusMesg[0] = '\0';
     editC.status_time = 0;
+    editC.dirtyFlag = 0;
 
 
     if (getWindowSize(&editC.screen_rows, &editC.screen_cols) == -1) {
@@ -727,7 +759,8 @@ int main(int argc, char *argv[]) {
     if(argc >= 2) {
         editorOpen(argv[1]);
     }
-    editorSetStatusMsg("SMEditor-HELP: Press Ctrl-q to quit.");
+
+    editorSetStatusMsg("HELP: Ctrl-S = save | Ctrl-Q = quit");
     // read one byte at a time and quit reading when key pressed is 'q'
     while (1) {
         editorRefreshScreen();
