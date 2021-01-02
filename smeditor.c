@@ -330,6 +330,16 @@ void editorInsertCharAt(erow *row, int at, int c) {
     editC.dirtyFlag++;
 }
 
+/**
+ * Deletes a char from a row.
+ */
+void editorRowDelChar(erow *row, int at) {
+    if(at <0 || at >= row->size) return;
+    memmove(&row->chars[at], &row->chars[at+1],row->size - at);
+    row->size--;
+    editorUpdateRow(row);
+    editC.dirtyFlag++;
+}
 /** i==================================== editor operations. ===================
  *  contains functions that we?ll call from editorProcessKeypress() when we?re
  *  mapping keypresses to various text editing operations
@@ -342,6 +352,18 @@ void editorInsertChar(int c) {
     }
     editorInsertCharAt(&editC.row[editC.cy], editC.cx, c);
     editC.cx++;
+}
+
+void editorDelChar() {
+    //If editC.cy == editC.numrows, then the cursor is on the tilde line after
+    //the end of the file, so we need to append a new row
+    if (editC.cy == editC.num_rows) return;
+
+    erow *row = &editC.row[editC.cy];
+    if(editC.cx > 0) {
+        editorRowDelChar(row, editC.cx -1);
+        editC.cx--;
+    }
 }
 /** ======================== File IO functions ===================================== */
 
@@ -567,6 +589,8 @@ void editorProcessKeypress() {
         case CTRL_KEY('h'):
         case DEL_KEY:
             /** TODO */
+            if(c == DEL_KEY) editorMoveCursor(ARROW_RIGHT);
+            editorDelChar();
         case CTRL_KEY('l'):
         case '\x1b':
             break;
