@@ -293,10 +293,18 @@ void editorUpdateRow(erow *row) {
     row->rsize = idx;
 }
 
-void editorAppendRow(char *s, size_t len) {
-    editC.row = realloc(editC.row, sizeof(erow) * (editC.num_rows + 1));
+/**
+ * Inserts a row at the specified index
+ *
+ */
+void editorInsertRow(int at, char *s, size_t len) {
+    if (at < 0 || at > editC.num_rows) return;
 
-    int at = editC.num_rows;
+    editC.row = realloc(editC.row, sizeof(erow) * (editC.num_rows + 1));
+    // use memmove() to make room at the specified index for the new row.
+    memmove(&editC.row[at + 1], &editC.row[at],sizeof(erow) * (editC.num_rows - at));
+
+    //int at = editC.num_rows;
     editC.row[at].size = len;
     editC.row[at].chars = malloc(len + 1);
     memcpy(editC.row[at].chars, s, len);
@@ -381,10 +389,36 @@ void editorInsertChar(int c) {
     //If editC.cy == editC.numrows, then the cursor is on the tilde line after
     //the end of the file, so we need to append a new row
     if (editC.cy == editC.num_rows) {
-        editorAppendRow("",0);
+        editorInsertRow(editC.num_rows,"",0);
     }
     editorInsertCharAt(&editC.row[editC.cy], editC.cx, c);
     editC.cx++;
+}
+
+/**
+ *
+ */
+void editorInsertNewline() {
+    if(editC.cx ==0) {
+        editorInsertRow(editC.cy,"",0);
+    } else {
+        //split the line we?re on into two rows
+        erow *row = &editC.row[editC.cy];
+        //First we call editorInsertRow() and pass it the characters
+        //on the current row that are to the right of the cursor.
+        //That creates a new row after the current one, with the correct contents.
+        editorInsertRow(editC.cy + 1, &row->chars[editC.cx], row->size - editC.cx);
+        //Then we reassign the row pointer, because editorInsertRow() calls realloc(),
+        //which might move memory around on us and invalidate the pointer
+        row = &editC.row[editC.cy];
+        row->size = editC.cx;
+        //we truncate the current row's contents by setting its size to the position
+        //of the cursor, and we call editorUpdateRow() on the truncated row.
+        row->chars[row->size] = '\0';
+        editorUpdateRow(row);
+    }
+    editC.cy++;
+    editC.cx = 0;
 }
 
 void editorDelChar() {
@@ -451,7 +485,7 @@ void editorOpen(char *filename) {
         while(lineLen >0 && (line[lineLen - 1] == '\n' ||
                              line[lineLen - 1] == '\r'))
             lineLen--;
-        editorAppendRow(line, lineLen);
+        editorInsertRow(editC.num_rows,line, lineLen);
     }
     free(line);
     fclose(fp);
@@ -602,7 +636,8 @@ void editorProcessKeypress() {
             editorSave();
             break;
         case '\r':
-            //TODO
+            //insert a new line
+            editorInsertNewline();
             break;
         case PAGE_UP:
         case PAGE_DOWN:
