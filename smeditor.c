@@ -69,6 +69,8 @@ struct editorConfig editC;
 
 /*** prototypes ***/
 void editorSetStatusMessage(const char *fmt, ...);
+void editorRefreshScreen();
+char* editorPrompt(char *prompt);
 
 /** ================= All terminal handling functions. ==========================*/
 
@@ -507,7 +509,13 @@ void editorOpen(char *filename) {
  *
  */
 void editorSave() {
-    if (editC.filename == NULL) return;
+    if (editC.filename == NULL) {
+        editC.filename = editorPrompt("Save file as: %s");
+        if (editC.filename == NULL) {
+            editorSetStatusMsg("Save aborted.");
+            return;
+        }
+    }
 
     int len;
     char *buf = editorRowsToString(&len);
@@ -564,6 +572,53 @@ void bufferFree(struct appendBuf *ab) {
 
 /** ===================== All keyboard input handling functions. =====================*/
 
+char *editorPrompt(char *prompt) {
+    // user?s input is stored in buf which is dynamically allocated
+    size_t bufsize = 128;
+    char *buf = malloc(bufsize);
+    size_t buflen = 0;
+    buf[0]='\0';
+
+    //enter an infinite loop that repeatedly sets the status message,
+    //refreshes the screen, and waits for a keypress to handle. The prompt is
+    //expected to be a format string containing a %s, which is where the user's
+    //input will be displayed.
+    while(1) {
+        editorSetStatusMsg(prompt, buf);
+        editorRefreshScreen();
+
+        int c = editorReadKey();
+        //When the user presses Enter, and their input is not empty,
+        //the status message is cleared and their input is returned.
+        //Otherwise, when they input a printable character, we append it to buf.
+        //allow the user to press Backspace (or Ctrl-H, or Delete) in the input prompt.
+        if (c == DEL_KEY || c == CTRL_KEY('h') || c == BACKSPACE) {
+            if (buflen != 0) buf[--buflen] = '\0';
+        } else if (c == '\x1b') {
+            editorSetStatusMsg("");
+            free(buf);
+            return NULL;
+        } else  if (c == '\r') {
+            if (buflen !=0) {
+                editorSetStatusMsg("");
+                return buf;
+            }
+        } else if (!iscntrl(c) && c <128) {
+            // If buflen has reached the maximum capacity we allocated
+            // (stored in bufsize), then we double bufsize and allocate that
+            // amount of memory before appending to buf.
+            if (buflen == bufsize -1) {
+                bufsize *= 2;
+                buf = realloc(buf, bufsize);
+            }
+            // make sure that buf ends with a \0 character,
+            // because both editorSetStatusMessage() and the caller of
+            // editorPrompt() will use it to know where the string ends.
+            buf[buflen++] = c;
+            buf[buflen] = '\0';
+        }
+    }
+}
 void editorMoveCursor(int key) {
     // check if the cursor is on an actual line. If it is, then the row
     // variable will point to the erow that the cursor is on, and we?ll
