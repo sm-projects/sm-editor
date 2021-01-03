@@ -24,7 +24,7 @@
 #define CTRL_KEY(k)  ((k) & 0x1f)
 #define SMEDITOR_VERSION "Alpha-0.0.1"
 #define SMEDITOR_TAB_STOP 8
-#define SMEDITOR_QUIT_TIMES 3;
+#define SMEDITOR_QUIT_TIMES 1;
 
 enum editorKey {
     BACKSPACE = 127, //ASCII value
@@ -311,6 +311,26 @@ void editorAppendRow(char *s, size_t len) {
 }
 
 /**
+ *
+ *
+ */
+void editorFreeRow(erow *row) {
+    free(row->render);
+    free(row->chars);
+}
+/**
+ * free the memory owned by the row using editorFreeRow(). Then use memmove()
+ * to overwrite the deleted row struct with the rest of the rows that come after it,
+ * and decrement numrows. Finally, we increment E.dirty.
+ */
+void editorDelRow(int at) {
+    if(at < 0 || at >= editC.num_rows) return;
+    editorFreeRow(&editC.row[at]);
+    memmove(&editC.row[at], &editC.row[at + 1],sizeof(erow) * (editC.num_rows - at - 1));
+    editC.num_rows--;
+    editC.dirtyFlag++;
+}
+/**
  * Allows the user to edit the opened file, one char at a time.
  */
 void editorInsertCharAt(erow *row, int at, int c) {
@@ -326,6 +346,19 @@ void editorInsertCharAt(erow *row, int at, int c) {
     memmove(&row->chars[at + 1], &row->chars[at], row->size - at + 1);
     row->size++;
     row->chars[at] = c;
+    editorUpdateRow(row);
+    editC.dirtyFlag++;
+}
+/**
+ * appends a string to the end of a row.
+ */
+void editorRowAppendString(erow *row, char *s, size_t len) {
+    //rows new size is row->size _ leb + 1 including null byte.
+    row->chars = realloc(row->chars,row->size + len + 1);
+    //memcpy the given string to the end of the contents of row->chars
+    memcpy(&row->chars[row->size],s,len);
+    row->size += len;
+    row->chars[row->size] = '\0';
     editorUpdateRow(row);
     editC.dirtyFlag++;
 }
@@ -358,11 +391,18 @@ void editorDelChar() {
     //If editC.cy == editC.numrows, then the cursor is on the tilde line after
     //the end of the file, so we need to append a new row
     if (editC.cy == editC.num_rows) return;
+    //if the cursor is at the beginning of the first line, do nothing
+    if (editC.cx == 0 && editC.cy == 0) return;
 
     erow *row = &editC.row[editC.cy];
     if(editC.cx > 0) {
         editorRowDelChar(row, editC.cx -1);
         editC.cx--;
+    } else {
+        editC.cx = editC.row[editC.cy - 1].size;
+        editorRowAppendString(&editC.row[editC.cy -1], row->chars,row->size);
+        editorDelRow(editC.cy);
+        editC.cy--;
     }
 }
 /** ======================== File IO functions ===================================== */
