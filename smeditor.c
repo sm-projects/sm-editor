@@ -535,6 +535,25 @@ void editorSave() {
     free(buf);
     editorSetStatusMsg("Failed to save file to disk: %s", strerror(errno));
 }
+
+/** ======================== Find Functions============================*/
+void editorFind() {
+    char *query = editorPrompt("Search: %s (Press Esc to cancel)");
+    if (query == NULL) return;
+
+    int i;
+    for(i=0; i < editC.num_rows;i++) {
+        erow *row = &editC.row[i];
+        char *match = strstr(row->render,query);
+        if (match) {
+            editC.cy = i;
+            editC.cx = match - row->render;
+            editC.rowoffset = editC.num_rows;
+            break;
+        }
+    }
+    free(query);
+}
 /** ======================== All write buffer handling goes here. ===================*/
 struct appendBuf {
     char *buf;
@@ -717,6 +736,9 @@ void editorProcessKeypress() {
             break;
         case BACKSPACE:
         case CTRL_KEY('h'):
+        case CTRL_KEY('f'):
+            editorFind();
+            break;
         case DEL_KEY:
             /** TODO */
             if(c == DEL_KEY) editorMoveCursor(ARROW_RIGHT);
