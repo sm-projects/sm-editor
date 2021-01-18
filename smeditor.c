@@ -51,6 +51,7 @@ typedef struct erow {
 // A struct to hold edtor configs and state.
 struct editorConfig {
  int cx,cy; //track cursor's position
+ int rx; //tracks cursors horizontal render position
  //Number of icols and rows in the screen available from ioctl
  int screen_rows;
  int screen_cols;
@@ -263,6 +264,23 @@ int getWindowSize(int *rows, int *cols) {
     }
 }
 /** ======================== All Editor row manipulation functions  . ===================*/
+
+/**
+ * calculate the value of editC.rx properly in editorScroll().
+ * editorRowCxToRx() function converts a chars index into a render index.
+ * loop through all the characters to the left of cx, and figure out how many
+ * spaces each tab takes up.*/
+int editorRowCxToRx(erow *row, int cx) {
+    int rx = 0;
+    for(int k=0; k < cx; k++) {
+        if(row->chars[k] == '\t') {
+            rx += (SMEDITOR_TAB_STOP - 1) - (rx % SMEDITOR_TAB_STOP );
+        }
+        rx++;
+    }
+    return rx;
+}
+
 /**
  * This function uses the chars string of an erow to fill in the contents
  * of the render string
@@ -321,7 +339,7 @@ void editorInsertRow(int at, char *s, size_t len) {
 }
 
 /**
- *
+ * Frees memory held for row and char array
  *
  */
 void editorFreeRow(erow *row) {
@@ -755,17 +773,22 @@ void editorProcessKeypress() {
 
 /**  Editor output functions. *******************************************/
 void editorScroll() {
+
+    editC.rx = 0;
+    if(editC.cy < editC.num_rows) {
+        editC.rx = editorRowCxToRx(&editC.row[editC.cy],editC.cx);
+    }
     if (editC.cy < editC.rowoffset) {
         editC.rowoffset = editC.cy;
     }
     if (editC.cy >= editC.rowoffset + editC.screen_rows){
         editC.rowoffset = editC.cy - editC.screen_rows + 1;
     }
-    if (editC.cx <  editC.coloffset ){
-        editC.coloffset = editC.cx;
+    if (editC.rx <  editC.coloffset ){
+        editC.coloffset = editC.rx;
     }
-    if (editC.cx >= editC.coloffset + editC.screen_cols){
-        editC.coloffset = editC.cx - editC.screen_cols + 1;
+    if (editC.rx >= editC.coloffset + editC.screen_cols){
+        editC.coloffset = editC.rx - editC.screen_cols + 1;
     }
 }
 
@@ -894,7 +917,7 @@ void editorRefreshScreen() {
 
     char buf[32];
     snprintf(buf,sizeof(buf),"\x1b[%d;%dH",(editC.cy - editC.rowoffset) + 1,
-                                           (editC.cx - editC.coloffset) + 1);
+                                           (editC.rx - editC.coloffset) + 1);
     appendToBuffer(&ab,buf,strlen(buf));
 
 
@@ -910,6 +933,7 @@ void initEditor() {
     //Set cursor position to top left corner
     editC.cx = 0;
     editC.cy = 0;
+    editC.rx = 0;
     editC.num_rows = 0;
     editC.row = NULL;
     editC.rowoffset = 0;
@@ -918,7 +942,6 @@ void initEditor() {
     editC.statusMesg[0] = '\0';
     editC.status_time = 0;
     editC.dirtyFlag = 0;
-
 
     if (getWindowSize(&editC.screen_rows, &editC.screen_cols) == -1) {
         handleError("Unable to get window size.");
@@ -935,9 +958,8 @@ int main(int argc, char *argv[]) {
     if(argc >= 2) {
         editorOpen(argv[1]);
     }
-
-    editorSetStatusMsg("HELP: Ctrl-S = save | Ctrl-Q = quit");
-    // read one byte at a time and quit reading when key pressed is 'q'
+    editorSetStatusMsg("HELP: Ctrl-S = save | Ctrk-F = find | Ctrl-Q = quit");
+    //read one byte at a time and quit reading when key pressed is 'q'
     while (1) {
         editorRefreshScreen();
         editorProcessKeypress();
